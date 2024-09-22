@@ -1,6 +1,7 @@
 import ./make-test-python.nix (
   { lib, ... }:
   let
+    wg-snakeoil-keys = import ./wireguard/snakeoil-keys.nix;
     server_name = "acme.test";
     hosts = ''
       216.58.211.1 ${server_name}
@@ -88,6 +89,36 @@ import ./make-test-python.nix (
         { pkgs, ... }:
         (generateCommon 2)
         // {
+          networking.wg-quick.interfaces.wg0 = {
+            address = [
+              "10.23.42.1/32"
+              "fc00::1/128"
+            ];
+            listenPort = 2408;
+
+            inherit (wg-snakeoil-keys.peer0) privateKey;
+
+            peers = lib.singleton {
+              allowedIPs = [
+                "10.23.42.2/32"
+                "fc00::2/128"
+              ];
+
+              inherit (wg-snakeoil-keys.peer1) publicKey;
+            };
+
+            dns = [
+              "10.23.42.2"
+              "fc00::2"
+              "wg0"
+            ];
+          };
+
+          boot.kernel.sysctl = {
+            "net.ipv4.ip_forward" = "1";
+            "net.ipv6.conf.all.forwarding" = "1";
+          };
+
           services.sing-box = {
             enable = true;
             settings = {
@@ -346,6 +377,12 @@ import ./make-test-python.nix (
                   listen = "127.0.0.1";
                   listen_port = 1090;
                 }
+                {
+                  type = "mixed";
+                  tag = "inbound:mixed:wireguard";
+                  listen = "127.0.0.1";
+                  listen_port = 1091;
+                }
               ];
               outbounds = [
                 {
@@ -458,6 +495,18 @@ import ./make-test-python.nix (
                   };
                   tls = singTlsClient;
                 }
+                {
+                  type = "wireguard";
+                  tag = "outbound:wireguard";
+                  interface_name = "wg0";
+                  local_address = "10.23.42.2/32";
+                  mtu = 1280;
+                  private_key = wg-snakeoil-keys.peer1.privateKey;
+                  peer_public_key = wg-snakeoil-keys.peer0.publicKey;
+                  server = "server.lan";
+                  server_port = 2408;
+                  system_interface = true;
+                }
               ];
               route = {
                 final = "outbound:block";
@@ -521,6 +570,12 @@ import ./make-test-python.nix (
                       "inbound:mixed:vmess-ws"
                     ];
                     outbound = "outbound:vmess-ws";
+                  }
+                  {
+                    inbound = [
+                      "inbound:mixed:wireguard"
+                    ];
+                    outbound = "outbound:wireguard";
                   }
                 ];
               };
@@ -600,6 +655,7 @@ import ./make-test-python.nix (
       server.systemctl("start network-online.target")
       server.wait_for_unit("network-online.target")
       server.wait_for_unit("sing-box.service")
+      server.wait_for_unit("wg-quick-wg0.service")
       server.wait_for_open_port(1080)
       server.wait_for_open_port(1081)
       server.wait_for_open_port(1082)
@@ -622,6 +678,7 @@ import ./make-test-python.nix (
       normalClient.wait_for_open_port(1088)
       normalClient.wait_for_open_port(1089)
       normalClient.wait_for_open_port(1090)
+      normalClient.wait_for_open_port(1091)
 
       # inbound:mixed
       normalClient.succeed("curl --fail --max-time 10 --proxy http://user:supersecret@server.lan:1080 https://${server_name}")
@@ -677,6 +734,10 @@ import ./make-test-python.nix (
 
       # log
       tunClient.succeed("grep '216.58.211.1:443' /tmp/sing-box.log")
+
+      # wireguard
+      normalClient.succeed("curl --fail --max-time 10 --proxy socks5://localhost:1091 https://${server_name}")
+      normalClient.succeed("curl --fail --max-time 10 --interface wg0 https://${server_name}")
     '';
 
   }
