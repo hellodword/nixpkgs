@@ -107,6 +107,14 @@ import ./make-test-python.nix (
               };
             };
 
+          systemd.services.logrotate.serviceConfig = {
+            ReadWritePaths = [
+              "/var/log"
+              "/var/log/private"
+              "/var/log/private/foo"
+            ];
+          };
+
           services.logrotate = {
             enable = true;
             settings.foo = {
