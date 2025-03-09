@@ -6,7 +6,7 @@ on:
       branch:
         required: true
         type: string
-      command:
+      package:
         required: true
         type: string
 
@@ -38,4 +38,4 @@ jobs:
     - name: Run `ci.sh`
       run: |
         . ~/.nix-profile/etc/profile.d/nix.sh
-        ${{ inputs.command }}
+        env NIXPKGS_ALLOW_UNFREE=1 nix build --impure .#legacyPackages.$(uname -m)-linux.${{ inputs.package }}
